@@ -103,8 +103,9 @@ export default function Home() {
 
     if (patch.atsScore !== undefined && patch.atsScore !== null) {
       const currentScore = localAtsScore ?? optimizer.optimizedData?.atsScore ?? 0;
-      if (patch.atsScore > currentScore) {
-        setLocalAtsScore(patch.atsScore);
+      const newScore = Math.min(100, patch.atsScore);
+      if (newScore > currentScore) {
+        setLocalAtsScore(newScore);
       }
     }
 

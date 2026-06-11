@@ -134,3 +134,21 @@ export interface OptimizerState {
   optimizedData: OptimizedResumeResponse | null;
   error: string | null;
 }
+
+// ─── Copilot Types ─────────────────────────────────────────────────────────────
+
+export interface CopilotMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  isStreaming?: boolean;
+}
+
+/** Sparse patch — only the fields that changed. null means "don't touch". */
+export interface ResumePatch {
+  summary?: string | null;
+  experience?: Array<{ id: string; bullets: string[] }>;
+  skills?: SkillsSection | null;
+  missingKeywords?: string[] | null;
+  atsScore?: number | null;
+}

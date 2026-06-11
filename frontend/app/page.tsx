@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import Header from "@/components/layout/Header";
 import DropZone from "@/components/upload/DropZone";
@@ -9,20 +9,156 @@ import AnalyzeButton from "@/components/controls/AnalyzeButton";
 import PDFPreview from "@/components/pdf/PDFPreview";
 import PDFSkeleton from "@/components/pdf/PDFSkeleton";
 import InsightsPanel from "@/components/insights/InsightsPanel";
+import CopilotChat from "@/components/copilot/CopilotChat";
 import Toast, { useToast } from "@/components/ui/Toast";
 import { useResumeOptimizer } from "@/hooks/useResumeOptimizer";
-import { usePDFGenerator } from "@/hooks/usePDFGenerator";
-import { FileText, Wand2 } from "lucide-react";
+import { usePDFGenerator, type PDFDocumentProps } from "@/hooks/usePDFGenerator";
+import { FileText, Wand2, Sparkles } from "lucide-react";
+import type { ResumePatch } from "@/services/types";
 
 export default function Home() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [jdFile, setJdFile] = useState<File | null>(null);
-  const [activeRightTab, setActiveRightTab] = useState<"preview" | "insights">("preview");
+  const [activeRightTab, setActiveRightTab] = useState<"preview" | "insights" | "chat">("preview");
+
+  // Copilot prefill (from Insights "Fix →" button)
+  const [copilotPrefill, setCopilotPrefill] = useState<string | undefined>();
 
   const { toasts, addToast, dismiss } = useToast();
   const optimizer = useResumeOptimizer();
-  const pdfProps = usePDFGenerator(optimizer.optimizedData);
+  const basePdfProps = usePDFGenerator(optimizer.optimizedData);
+
+  // Local PDF props state — patched by the copilot
+  const [pdfProps, setPdfProps] = useState<PDFDocumentProps | null>(null);
+
+  // Local insights state — patched by the copilot
+  const [localAtsScore, setLocalAtsScore] = useState<number | null>(null);
+  const [localMissingKeywords, setLocalMissingKeywords] = useState<string[] | null>(null);
+  const [localMatchedKeywords, setLocalMatchedKeywords] = useState<string[] | null>(null);
+  const [localSuggestions, setLocalSuggestions] = useState<import("@/services/types").OptimizationSuggestion[] | null>(null);
+
+  // Undo history — each entry is a full snapshot before a patch was applied
+  const [undoStack, setUndoStack] = useState<Array<{
+    pdfProps: PDFDocumentProps;
+    atsScore: number | null;
+    missingKeywords: string[] | null;
+    matchedKeywords: string[] | null;
+    suggestions: import("@/services/types").OptimizationSuggestion[] | null;
+  }>>([]);
+
+  // Sync basePdfProps → localPdfProps whenever a fresh optimization result arrives
+  useEffect(() => {
+    if (basePdfProps) {
+      setPdfProps(basePdfProps);
+      setLocalAtsScore(null);
+      setLocalMissingKeywords(null);
+      setLocalMatchedKeywords(null);
+      setLocalSuggestions(null);
+      setUndoStack([]);  // reset history on new optimization
+    }
+  }, [basePdfProps]);
+
+  /** Apply a sparse patch from the copilot onto the live pdfProps state */
+  const applyPatch = useCallback((patch: ResumePatch) => {
+    // Snapshot current state BEFORE applying — enables undo
+    setPdfProps((prev) => {
+      if (!prev) return prev;
+
+      setUndoStack((stack) => [
+        ...stack,
+        {
+          pdfProps: prev,
+          atsScore: localAtsScore,
+          missingKeywords: localMissingKeywords,
+          matchedKeywords: localMatchedKeywords,
+          suggestions: localSuggestions,
+        },
+      ]);
+
+      const next = { ...prev };
+
+      if (patch.summary !== undefined && patch.summary !== null) {
+        next.summary = patch.summary;
+      }
+
+      if (patch.experience && patch.experience.length > 0) {
+        next.experience = prev.experience.map((exp, idx) => {
+          const patchedItem = patch.experience!.find(
+            (p) => optimizer.optimizedData?.optimizedResume.experience[idx]?.id === p.id
+          );
+          return patchedItem ? { ...exp, bullets: patchedItem.bullets } : exp;
+        });
+      }
+
+      if (patch.skills !== undefined && patch.skills !== null) {
+        next.skills = patch.skills.categories.map((c) => ({
+          name: c.name,
+          skills: c.skills,
+        }));
+      }
+
+      return next;
+    });
+
+    if (patch.atsScore !== undefined && patch.atsScore !== null) {
+      const currentScore = localAtsScore ?? optimizer.optimizedData?.atsScore ?? 0;
+      if (patch.atsScore > currentScore) {
+        setLocalAtsScore(patch.atsScore);
+      }
+    }
+
+    if (patch.missingKeywords !== undefined && patch.missingKeywords !== null) {
+      // Compute which keywords just got fixed (were missing, now aren't)
+      const prevMissing = localMissingKeywords ?? optimizer.optimizedData?.missingKeywords ?? [];
+      const newMissing = patch.missingKeywords;
+      const justFixed = prevMissing.filter((k) => !newMissing.includes(k));
+
+      // Move them into the matched list
+      if (justFixed.length > 0) {
+        const prevMatched = localMatchedKeywords ?? optimizer.optimizedData?.matchedKeywords ?? [];
+        setLocalMatchedKeywords([...prevMatched, ...justFixed]);
+
+        // Drop suggestions that mention any of the now-fixed keywords
+        const prevSuggestions = localSuggestions ?? optimizer.optimizedData?.suggestions ?? [];
+        const updatedSuggestions = prevSuggestions.filter(
+          (s) => !justFixed.some((k) => s.message.toLowerCase().includes(k.toLowerCase()))
+        );
+        setLocalSuggestions(updatedSuggestions);
+      }
+
+      setLocalMissingKeywords(newMissing);
+    }
+  }, [localAtsScore, localMissingKeywords, localMatchedKeywords, localSuggestions, optimizer.optimizedData]);
+
+  /** Undo the last copilot patch by restoring the previous snapshot */
+  const handleUndo = useCallback(() => {
+    setUndoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const prev = stack[stack.length - 1];
+      setPdfProps(prev.pdfProps);
+      setLocalAtsScore(prev.atsScore);
+      setLocalMissingKeywords(prev.missingKeywords);
+      setLocalMatchedKeywords(prev.matchedKeywords);
+      setLocalSuggestions(prev.suggestions);
+      return stack.slice(0, -1);
+    });
+  }, []);
+
+  const handleFixKeyword = useCallback((keyword: string) => {
+    setCopilotPrefill(
+      `Please add "${keyword}" naturally into my resume experience or skills section to improve my ATS score.`
+    );
+    setActiveRightTab("chat");
+  }, []);
+
+  const handleFixAll = useCallback((keywords: string[]) => {
+    const list = keywords.map((k) => `"${k}"`).join(", ");
+    setCopilotPrefill(
+      `Please add ALL of the following missing keywords naturally into my resume (experience bullets, summary, or skills) to maximize my ATS score: ${list}. For each keyword, find the most relevant section and weave it in professionally.`
+    );
+    setActiveRightTab("chat");
+  }, []);
 
   const canAnalyze =
     resumeFile !== null &&
@@ -44,6 +180,12 @@ export default function Home() {
     setResumeFile(null);
     setJobDescription("");
     setJdFile(null);
+    setPdfProps(null);
+    setLocalAtsScore(null);
+    setLocalMissingKeywords(null);
+    setLocalMatchedKeywords(null);
+    setLocalSuggestions(null);
+    setUndoStack([]);
   }, [optimizer]);
 
   const isRightLoading =
@@ -51,11 +193,28 @@ export default function Home() {
 
   const showPreview = optimizer.appState === "success" && pdfProps !== null;
 
+  // Effective insights data (merged with copilot patches)
+  const effectiveInsightsData = optimizer.optimizedData
+    ? {
+        ...optimizer.optimizedData,
+        atsScore: localAtsScore ?? optimizer.optimizedData.atsScore,
+        missingKeywords: localMissingKeywords ?? optimizer.optimizedData.missingKeywords,
+        matchedKeywords: localMatchedKeywords ?? optimizer.optimizedData.matchedKeywords,
+        suggestions: localSuggestions ?? optimizer.optimizedData.suggestions,
+      }
+    : null;
+
+  const tabs = [
+    { id: "preview" as const, label: "Preview" },
+    { id: "insights" as const, label: "Insights" },
+    { id: "chat" as const, label: "Copilot", icon: <Sparkles className="w-3 h-3" /> },
+  ];
+
   return (
-    <div className="gradient-mesh min-h-screen flex flex-col">
+    <div className="gradient-mesh h-screen flex flex-col overflow-hidden">
       <Header
         backendOnline={optimizer.appState !== "error"}
-        atsScore={optimizer.optimizedData?.atsScore ?? null}
+        atsScore={effectiveInsightsData?.atsScore ?? null}
         docProps={pdfProps}
       />
 
@@ -103,20 +262,23 @@ export default function Home() {
           </div>
 
           {/* JD Input */}
-          <JDInput
-            value={jobDescription}
-            onChange={setJobDescription}
-            file={jdFile}
-            onFileChange={setJdFile}
-            disabled={isRightLoading}
-          />
+          <div className="flex-1 flex flex-col min-h-[200px]">
+            <JDInput
+              value={jobDescription}
+              onChange={setJobDescription}
+              file={jdFile}
+              onFileChange={setJdFile}
+              disabled={isRightLoading}
+              className="flex-1"
+            />
 
-          {/* Validation hint */}
-          {!jdFile && jobDescription.length > 0 && jobDescription.trim().length < 50 && (
-            <p className="text-xs text-amber-400/60 px-1 -mt-3 animate-[fade-in_0.2s_ease-out]">
-              Add at least 50 characters for meaningful analysis
-            </p>
-          )}
+            {/* Validation hint */}
+            {!jdFile && jobDescription.length > 0 && jobDescription.trim().length < 50 && (
+              <p className="text-xs text-amber-400/60 px-1 mt-2 animate-[fade-in_0.2s_ease-out]">
+                Add at least 50 characters for meaningful analysis
+              </p>
+            )}
+          </div>
 
           {/* CTA */}
           <div className="mt-auto pt-2">
@@ -145,24 +307,25 @@ export default function Home() {
         {/* ── RIGHT PANE ───────────────────────────────────── */}
         <section
           aria-label="Optimized resume output"
-          className="flex-1 flex flex-col p-6 lg:p-8 overflow-hidden min-h-[600px]"
+          className="flex-1 flex flex-col p-6 lg:p-8 overflow-hidden"
         >
           {/* Tab bar — only when results are available */}
           {showPreview && (
-            <div className="flex items-center justify-between mb-2 w-full">
-              <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white/[0.03] border border-white/[0.07] w-fit">
-                {(["preview", "insights"] as const).map((tab) => (
+            <div className="flex items-center justify-between mb-2 w-full shrink-0">
+              <div className="flex items-center gap-1 p-1.5 rounded-2xl bg-white/[0.03] border border-white/[0.07] w-fit">
+                {tabs.map((tab) => (
                   <button
-                    key={tab}
-                    onClick={() => setActiveRightTab(tab)}
+                    key={tab.id}
+                    onClick={() => setActiveRightTab(tab.id)}
                     className={cn(
-                      "px-8 py-2 rounded-xl text-sm font-medium transition-all duration-200 capitalize tracking-wide",
-                      activeRightTab === tab
+                      "flex items-center gap-1.5 px-6 py-2 rounded-xl text-sm font-medium transition-all duration-200 capitalize tracking-wide",
+                      activeRightTab === tab.id
                         ? "bg-white/[0.08] text-white/90 shadow-sm border border-white/[0.04]"
                         : "text-white/40 hover:text-white/70"
                     )}
                   >
-                    {tab}
+                    {tab.icon}
+                    {tab.label}
                   </button>
                 ))}
               </div>
@@ -171,14 +334,14 @@ export default function Home() {
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                 )}
                 <span className="text-xs font-medium text-white/50 uppercase tracking-wider">
-                  {activeRightTab === "preview" ? "Live Preview" : "Insights"}
+                  {activeRightTab === "preview" ? "Live Preview" : activeRightTab === "insights" ? "Insights" : "AI Copilot"}
                 </span>
               </div>
             </div>
           )}
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col relative">
             {/* Idle empty state */}
             {optimizer.appState === "idle" && (
               <div className="flex flex-col items-center justify-center h-full gap-6 text-center px-8">
@@ -200,7 +363,7 @@ export default function Home() {
                 </div>
                 {/* Feature chips */}
                 <div className="flex flex-wrap gap-2 justify-center mt-2">
-                  {["ATS keyword matching", "Live PDF preview", "One-click download"].map((f) => (
+                  {["ATS keyword matching", "Live PDF preview", "AI Copilot editing", "One-click download"].map((f) => (
                     <span
                       key={f}
                       className="px-3 py-1 rounded-full text-xs text-white/25 border border-white/[0.06] bg-white/[0.02]"
@@ -226,16 +389,42 @@ export default function Home() {
 
             {/* Success — PDF preview tab */}
             {showPreview && activeRightTab === "preview" && pdfProps && (
-              <PDFPreview
-                docProps={pdfProps}
-                atsScore={optimizer.optimizedData?.atsScore}
-              />
+              <div className="absolute inset-0 overflow-y-auto">
+                <PDFPreview
+                  docProps={pdfProps}
+                  atsScore={effectiveInsightsData?.atsScore}
+                />
+              </div>
             )}
 
             {/* Success — Insights tab */}
-            {showPreview && activeRightTab === "insights" && optimizer.optimizedData && (
-              <div className="animate-[fade-in-up_0.35s_cubic-bezier(0.16,1,0.3,1)]">
-                <InsightsPanel data={optimizer.optimizedData} />
+            {showPreview && activeRightTab === "insights" && effectiveInsightsData && (
+              <div className="absolute inset-0 overflow-y-auto animate-[fade-in-up_0.35s_cubic-bezier(0.16,1,0.3,1)] pb-8">
+                <InsightsPanel
+                  data={effectiveInsightsData}
+                  onFixKeyword={handleFixKeyword}
+                  onFixAll={handleFixAll}
+                />
+              </div>
+            )}
+
+            {/* Success — Copilot chat tab */}
+            {showPreview && optimizer.optimizedData && (
+              <div
+                className={cn(
+                  "absolute inset-0 animate-[fade-in-up_0.35s_cubic-bezier(0.16,1,0.3,1)] flex flex-col",
+                  activeRightTab !== "chat" && "hidden"
+                )}
+              >
+                <CopilotChat
+                  optimizedData={effectiveInsightsData!}
+                  jdText={jobDescription}
+                  onPatch={applyPatch}
+                  prefillMessage={copilotPrefill}
+                  onPrefillConsumed={() => setCopilotPrefill(undefined)}
+                  onUndo={handleUndo}
+                  canUndo={undoStack.length > 0}
+                />
               </div>
             )}
 

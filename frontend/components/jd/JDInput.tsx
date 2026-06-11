@@ -11,11 +11,12 @@ interface JDInputProps {
   file?: File | null;
   onFileChange?: (file: File | null) => void;
   disabled?: boolean;
+  className?: string;
 }
 
 const MAX_CHARS = 5000;
 
-export default function JDInput({ value, onChange, file, onFileChange, disabled }: JDInputProps) {
+export default function JDInput({ value, onChange, file, onFileChange, disabled, className }: JDInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -24,12 +25,6 @@ export default function JDInput({ value, onChange, file, onFileChange, disabled 
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value.slice(0, MAX_CHARS);
       onChange(val);
-      // Auto-resize
-      const ta = textareaRef.current;
-      if (ta) {
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 360)}px`;
-      }
     },
     [onChange]
   );
@@ -39,13 +34,6 @@ export default function JDInput({ value, onChange, file, onFileChange, disabled 
       const text = await navigator.clipboard.readText();
       const combined = (value + text).slice(0, MAX_CHARS);
       onChange(combined);
-      setTimeout(() => {
-        const ta = textareaRef.current;
-        if (ta) {
-          ta.style.height = "auto";
-          ta.style.height = `${Math.min(ta.scrollHeight, 360)}px`;
-        }
-      }, 0);
     } catch {
       // Clipboard access denied — let native paste handle it
     }
@@ -56,7 +44,7 @@ export default function JDInput({ value, onChange, file, onFileChange, disabled 
   const isNearLimit = charPercent > 80;
 
   return (
-    <div className="space-y-2">
+    <div className={cn("flex flex-col space-y-2 min-h-0", className)}>
       {/* Label row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -86,7 +74,7 @@ export default function JDInput({ value, onChange, file, onFileChange, disabled 
       {/* Textarea wrapper */}
       <div
         className={cn(
-          "relative rounded-xl overflow-hidden transition-all duration-200",
+          "relative rounded-xl overflow-hidden transition-all duration-200 flex-1 flex flex-col",
           "border",
           isFocused
             ? "border-accent/40 shadow-[0_0_0_3px_rgba(99,102,241,0.08)]"
@@ -107,13 +95,12 @@ export default function JDInput({ value, onChange, file, onFileChange, disabled 
           rows={7}
           maxLength={MAX_CHARS}
           className={cn(
-            "w-full resize-none bg-white/[0.02] px-4 pt-4 pb-8",
+            "w-full flex-1 resize-none bg-white/[0.02] px-4 pt-4 pb-8",
             "text-sm text-white/80 placeholder:text-white/20",
             "focus:outline-none focus:bg-white/[0.03]",
             "transition-colors duration-150",
-            "leading-relaxed"
+            "leading-relaxed scrollbar-hide"
           )}
-          style={{ minHeight: "180px", maxHeight: "360px" }}
         />
 
         {/* Bottom bar — char counter + progress */}

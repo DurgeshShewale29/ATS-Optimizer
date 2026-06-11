@@ -4,11 +4,13 @@ import { cn } from "@/lib/utils";
 import Badge from "@/components/ui/Badge";
 import Tooltip from "@/components/ui/Tooltip";
 import type { OptimizedResumeResponse } from "@/services/types";
-import { TrendingUp, CheckCircle2, XCircle, Lightbulb } from "lucide-react";
+import { TrendingUp, CheckCircle2, XCircle, Lightbulb, Wand2, Sparkles } from "lucide-react";
 
 interface InsightsPanelProps {
   data: OptimizedResumeResponse;
   className?: string;
+  onFixKeyword?: (keyword: string) => void;
+  onFixAll?: (keywords: string[]) => void;
 }
 
 const PRIORITY_VARIANT = {
@@ -17,7 +19,7 @@ const PRIORITY_VARIANT = {
   low:    "muted",
 } as const;
 
-export default function InsightsPanel({ data, className }: InsightsPanelProps) {
+export default function InsightsPanel({ data, className, onFixKeyword, onFixAll }: InsightsPanelProps) {
   const { atsScore, matchedKeywords, missingKeywords, suggestions } = data;
 
   return (
@@ -92,11 +94,46 @@ export default function InsightsPanel({ data, className }: InsightsPanelProps) {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {missingKeywords.map((kw) => (
-              <Tooltip key={kw} content="Add this to your resume" side="top">
-                <Badge variant="error">{kw}</Badge>
+              <Tooltip key={kw} content={onFixKeyword ? "Click Fix to add via Copilot" : "Add this to your resume"} side="top">
+                <div className="flex items-center gap-1">
+                  <Badge variant="error">{kw}</Badge>
+                  {onFixKeyword && (
+                    <button
+                      onClick={() => onFixKeyword(kw)}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium",
+                        "bg-accent/10 text-accent/70 border border-accent/20",
+                        "hover:bg-accent/20 hover:text-accent transition-all duration-150",
+                        "active:scale-95"
+                      )}
+                      title={`Ask Copilot to add "${kw}" to your resume`}
+                    >
+                      <Wand2 className="w-2.5 h-2.5" />
+                      Fix
+                    </button>
+                  )}
+                </div>
               </Tooltip>
             ))}
           </div>
+
+          {/* Fix All button */}
+          {onFixAll && missingKeywords.length > 1 && (
+            <button
+              onClick={() => onFixAll(missingKeywords)}
+              className={cn(
+                "mt-3 w-full flex items-center justify-center gap-2",
+                "px-4 py-2.5 rounded-xl text-sm font-medium",
+                "bg-accent/10 text-accent/80 border border-accent/20",
+                "hover:bg-accent/20 hover:text-accent hover:border-accent/40",
+                "transition-all duration-200 active:scale-[0.98]",
+                "shadow-[0_0_16px_rgba(99,102,241,0.08)] hover:shadow-[0_0_20px_rgba(99,102,241,0.18)]"
+              )}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Fix All {missingKeywords.length} Missing Keywords
+            </button>
+          )}
         </div>
       )}
 
@@ -127,3 +164,4 @@ export default function InsightsPanel({ data, className }: InsightsPanelProps) {
     </div>
   );
 }
+

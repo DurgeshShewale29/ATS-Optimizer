@@ -35,6 +35,8 @@ export const viewport: Viewport = {
   themeColor: "#080808",
 };
 
+import { Analytics } from "@vercel/analytics/next";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -44,6 +46,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         {children}
+        <Analytics />
       </body>
     </html>
   );

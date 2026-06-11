@@ -78,6 +78,10 @@ export default function Home() {
 
       const next = { ...prev };
 
+      if (patch.contact) {
+        next.contact = { ...prev.contact, ...patch.contact } as typeof prev.contact;
+      }
+
       if (patch.summary !== undefined && patch.summary !== null) {
         next.summary = patch.summary;
       }

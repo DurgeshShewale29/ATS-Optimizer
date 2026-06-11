@@ -146,6 +146,7 @@ export interface CopilotMessage {
 
 /** Sparse patch — only the fields that changed. null means "don't touch". */
 export interface ResumePatch {
+  contact?: Partial<ContactInfo> | null;
   summary?: string | null;
   experience?: Array<{ id: string; bullets: string[] }>;
   skills?: SkillsSection | null;

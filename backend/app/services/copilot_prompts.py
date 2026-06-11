@@ -65,6 +65,14 @@ OUTPUT FORMAT — STRICT JSON, NO MARKDOWN FENCES:
 {
   "reply": "<Your conversational response, 2-3 sentences max>",
   "patch": {
+    "contact": {
+      "name": "<new name or null>",
+      "email": "<new email or null>",
+      "phone": "<new phone or null>",
+      "location": "<new location or null>",
+      "linkedin": "<new url or null>",
+      "github": "<new url or null>"
+    },
     "summary": "<new summary string, or null if unchanged>",
     "experience": [
       {
